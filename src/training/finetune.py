@@ -303,8 +303,9 @@ def fit(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Phase 2a: freeze backbones
+    _m = model.module if hasattr(model, "module") else model
     try:
-        model.freeze_backbones()
+        _m.freeze_backbones()
     except AttributeError:
         pass
 
@@ -330,8 +331,9 @@ def fit(
 
         # Phase 2b transition
         if epoch == freeze_epochs:
+            _m = model.module if hasattr(model, "module") else model
             try:
-                model.unfreeze_backbones()
+                _m.unfreeze_backbones()
                 # Rebuild optimizer with discriminative LRs after unfreeze
                 optimizer = build_optimizer(model, backbone_lr, head_lr, weight_decay)
                 scheduler = cosine_schedule_with_warmup(optimizer, 0, total_steps)

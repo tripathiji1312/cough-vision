@@ -96,13 +96,18 @@ def train_one_epoch(
             # ----------------------------------------------------------------
             # Forward + loss (mixed precision)
             # ----------------------------------------------------------------
-            with torch.cuda.amp.autocast(enabled=(scaler is not None)):
+            with torch.amp.autocast("cuda", enabled=(scaler is not None)):
                 out  = model(images)
                 loss_dict = criterion(
                     out, tb_labels, findings, active,
                     lam=lam, labels_b=labels_b,
                 )
                 loss = loss_dict["loss"] / accumulation_steps
+
+            if not torch.isfinite(loss_dict["loss"]):
+                warnings.warn(f"NaN loss at step {step}, skipping", stacklevel=2)
+                optimizer.zero_grad()
+                continue
 
             if scaler is not None:
                 scaler.scale(loss).backward()
@@ -317,7 +322,7 @@ def fit(
 
     scheduler = cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
-    scaler: Any = torch.cuda.amp.GradScaler() if (
+    scaler: Any = torch.amp.GradScaler("cuda") if (
         mixed_prec and torch.cuda.is_available()
     ) else None
 

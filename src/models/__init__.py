@@ -241,12 +241,12 @@ def build_ensemble(cfg: Any | None = None) -> Any:
             head_params: list[Any]     = []
             backbone_names = {"cnn", "vit"}
 
-                for name, sub in self.named_children():
-                    params = list(sub.parameters())
-                    if name in backbone_names:
-                        backbone_params.extend(params)
-                    else:
-                        head_params.extend(params)
+            for name, sub in self.named_children():
+                params = list(sub.parameters())
+                if name in backbone_names:
+                    backbone_params.extend(params)
+                else:
+                    head_params.extend(params)
             return [
                 {"params": backbone_params, "lr": backbone_lr},
                 {"params": head_params,     "lr": head_lr},

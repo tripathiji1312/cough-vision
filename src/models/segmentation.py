@@ -310,7 +310,7 @@ def load_segmentation_checkpoint(
     _require(_TORCH_AVAILABLE, "torch")
     import torch  # type: ignore[import-untyped]
     try:
-        ckpt = torch.load(str(path), map_location=device)
+        ckpt = torch.load(str(path), map_location=device, weights_only=True)
         model.load_state_dict(ckpt["model_state_dict"])
         return {k: v for k, v in ckpt.items() if k != "model_state_dict"}
     except Exception as exc:

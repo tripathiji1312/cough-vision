@@ -228,16 +228,25 @@ def build_ensemble(cfg: Any | None = None) -> Any:
             backbone_lr: float = 1e-5,
             head_lr: float = 1e-3,
         ) -> list[dict[str, Any]]:
-            """Discriminative learning rates for AdamW."""
-            backbone_ids = {
-                id(p) for p in list(self.cnn.parameters()) + list(self.vit.parameters())
-            }
-            backbone_params = [
-                p for p in self.parameters() if id(p) in backbone_ids
-            ]
-            head_params = [
-                p for p in self.parameters() if id(p) not in backbone_ids
-            ]
+            """
+            Discriminative learning rates for AdamW.
+
+            Backbone (CNN + ViT) parameters use backbone_lr to preserve
+            pretrained representations.  Everything else (fusion + heads)
+            uses head_lr.  Uses named-submodule traversal rather than
+            id()-set membership so it remains correct under any future
+            parameter sharing (audit DEBT-04).
+            """
+            backbone_params: list[Any] = []
+            head_params: list[Any]     = []
+            backbone_names = {"cnn", "vit"}
+
+                for name, sub in self.named_children():
+                    params = list(sub.parameters())
+                    if name in backbone_names:
+                        backbone_params.extend(params)
+                    else:
+                        head_params.extend(params)
             return [
                 {"params": backbone_params, "lr": backbone_lr},
                 {"params": head_params,     "lr": head_lr},

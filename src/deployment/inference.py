@@ -115,23 +115,27 @@ class InferenceEngine:
     """
 
     def __init__(
-        self,
-        session: Any,
-        calibrator: Any | None = None,
-        seg_model: Any | None = None,
-        input_size: int = 224,
-        device: str = "cpu",
-        drift_window: int = 100,
-        baseline_mean_score: float | None = None,
-    ) -> None:
-        self._session          = session
-        self._calibrator       = calibrator
-        self._seg_model        = seg_model
-        self.input_size        = input_size
-        self.device            = device
-        self.drift_window      = drift_window
-        self._recent_scores:   list[float] = []
-        self._baseline_mean:   float | None = baseline_mean_score
+            self,
+            session: Any,
+            calibrator: Any | None = None,
+            seg_model: Any | None = None,
+            torch_model: Any | None = None,
+            input_size: int = 224,
+            device: str = "cpu",
+            drift_window: int = 100,
+            baseline_mean_score: float | None = None,
+        ) -> None:
+            self._session          = session
+            self._calibrator       = calibrator
+            self._seg_model        = seg_model
+            # Optional torch model for Grad-CAM (ONNX cannot produce gradients).
+            # When provided, positive predictions include a heatmap overlay.
+            self._torch_model      = torch_model
+            self.input_size        = input_size
+            self.device            = device
+            self.drift_window      = drift_window
+            self._recent_scores:   list[float] = []
+            self._baseline_mean:   float | None = baseline_mean_score
 
     # ------------------------------------------------------------------
     # Factory
@@ -344,12 +348,29 @@ class InferenceEngine:
                     stacklevel=2,
                 )
 
+        # -- Grad-CAM (DIR-01) -----------------------------------------------
+        # Produce a heatmap for every positive prediction when a torch
+        # model is attached. ONNX cannot backprop, so Grad-CAM requires
+        # the original torch model to be passed as torch_model= in __init__.
+        gradcam_result: Any = None
+        if tb_positive and self._torch_model is not None:
+            try:
+                import torch  # type: ignore[import-untyped]
+                self._torch_model.eval()
+                self._torch_model.enable_gradcam()
+                img_t = torch.from_numpy(x).float()  # (1, 3, H, W)
+                hmap  = self._torch_model._gradcam(img_t, class_idx=1)
+                gradcam_result = hmap  # (H', W') float array [0, 1]
+                self._torch_model.disable_gradcam()
+            except Exception as exc_cam:  # noqa: BLE001
+                warnings.warn(f"Grad-CAM failed: {exc_cam}", stacklevel=2)
+
         return TBPrediction(
             tb_score=tb_score,
             tb_positive=tb_positive,
             tb_prob=cal_prob,
             findings=findings,
-            gradcam=None,
+            gradcam=gradcam_result,
             inference_ms=inference_ms,
             site_threshold=threshold,
         )

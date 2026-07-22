@@ -82,10 +82,22 @@ cough-vision/
 ### 1. Install
 
 ```bash
-pip install -e ".[train]"
-# For dev tools:
-pip install -e ".[train,dev]"
+# Installs all runtime deps (torch, timm, opencv, sklearn, onnx, etc.)
+pip install -e .
+
+# With dev tools (pytest, black, mypy, isort):
+pip install -e ".[dev]"
+
+# With W&B training logging:
+pip install -e ".[dev,train]"
 ```
+
+### 1b. Prepare data CSVs
+
+Before training you need `data/train.csv`, `data/val.csv`, and `data/test.csv`.
+The schema is documented in `DATASETS.md`. Use the Kaggle notebook
+(`notebooks/train_kaggle.ipynb`) which auto-generates them from the raw datasets,
+or build them manually following the schema in `README.md#data-requirements`.
 
 ### 2. Train
 
@@ -94,7 +106,7 @@ python scripts/train.py \
   --preset      densenet_vit_ensemble \
   --train-csv   data/train.csv \
   --val-csv     data/val.csv \
-  --image-root  data/images \
+  --image-root  / \
   --output-dir  checkpoints \
   --device      cuda \
   --epochs      60 \

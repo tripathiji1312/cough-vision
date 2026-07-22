@@ -117,17 +117,25 @@ class PlattCalibrator:
     def _find_threshold(
         self, y_true: Any, y_score: Any, sensitivity_target: float
     ) -> float:
-        """Binary-search for the threshold achieving the sensitivity target."""
+        """
+        Find the highest threshold achieving sensitivity_target.
+        Iterates over unique raw scores (robust to ties -- audit CORRECT-02).
+        """
         _require(_NP_AVAILABLE, "numpy")
         import numpy as np  # type: ignore[import-untyped]
-        from sklearn.metrics import roc_curve  # type: ignore[import-untyped]
         try:
             cal_prob = self.predict_proba(y_score)
-            fpr, tpr, thresholds = roc_curve(y_true, cal_prob)
-            valid = np.where(tpr >= sensitivity_target)[0]
-            if len(valid) == 0:
-                return float(thresholds[np.argmax(tpr)])
-            return float(thresholds[int(valid[0])])  # highest threshold still meeting sensitivity target
+            yt   = np.asarray(y_true, dtype=int)
+            npos = int(yt.sum())
+            nneg = int((1 - yt).sum())
+            if npos == 0 or nneg == 0:
+                return 0.5
+            best = float(np.sort(np.unique(cal_prob))[0])
+            for t in np.sort(np.unique(cal_prob))[::-1]:
+                preds = (cal_prob >= t).astype(int)
+                if int(((preds == 1) & (yt == 1)).sum()) / npos >= sensitivity_target:
+                    return float(t)
+            return best
         except Exception:  # noqa: BLE001
             return 0.5
 
@@ -222,16 +230,25 @@ class IsotonicCalibrator:
     def _find_threshold(
         self, y_true: Any, y_score: Any, sensitivity_target: float
     ) -> float:
+        """
+        Find the highest threshold achieving sensitivity_target.
+        Iterates over unique raw scores (robust to ties -- audit CORRECT-02).
+        """
         _require(_NP_AVAILABLE, "numpy")
         import numpy as np  # type: ignore[import-untyped]
-        from sklearn.metrics import roc_curve  # type: ignore[import-untyped]
         try:
-            cal = self.predict_proba(y_score)
-            fpr, tpr, thresholds = roc_curve(y_true, cal)
-            valid = np.where(tpr >= sensitivity_target)[0]
-            if len(valid) == 0:
-                return float(thresholds[np.argmax(tpr)])
-            return float(thresholds[int(valid[0])])  # highest threshold still meeting sensitivity target
+            cal  = self.predict_proba(y_score)
+            yt   = np.asarray(y_true, dtype=int)
+            npos = int(yt.sum())
+            nneg = int((1 - yt).sum())
+            if npos == 0 or nneg == 0:
+                return 0.5
+            best = float(np.sort(np.unique(cal))[0])
+            for t in np.sort(np.unique(cal))[::-1]:
+                preds = (cal >= t).astype(int)
+                if int(((preds == 1) & (yt == 1)).sum()) / npos >= sensitivity_target:
+                    return float(t)
+            return best
         except Exception:  # noqa: BLE001
             return 0.5
 

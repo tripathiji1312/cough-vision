@@ -44,7 +44,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     model = build_ensemble(cfg)
 
     try:
-        ckpt = torch.load(args.checkpoint, map_location="cpu")
+        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)  # nosec - our own checkpoints only
         model.load_state_dict(ckpt["model_state_dict"])
         print(f"Loaded checkpoint (epoch={ckpt.get('epoch','?')})")
     except Exception as exc:

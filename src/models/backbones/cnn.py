@@ -159,7 +159,7 @@ def _load_encoder_weights(encoder: Any, ckpt_path: str) -> None:
         raise FileNotFoundError(f"Checkpoint not found: {path}")
 
     try:
-        ckpt = torch.load(str(path), map_location="cpu")
+        ckpt = torch.load(str(path), map_location="cpu", weights_only=True)
     except Exception as exc:
         raise OSError(f"Failed to load checkpoint {path}: {exc}") from exc
 
@@ -208,22 +208,3 @@ def unfreeze_backbone(model: Any) -> None:
         param.requires_grad = True
 
 
-def get_parameter_groups(
-    model: Any,
-    backbone_lr: float = 1e-5,
-    head_lr: float = 1e-3,
-) -> list[dict[str, Any]]:
-    """
-    Return discriminative learning-rate parameter groups for AdamW.
-
-    Backbone parameters use a lower LR (backbone_lr) to preserve
-    pretrained representations; head parameters use head_lr.
-    """
-    backbone_params = list(model.encoder.parameters())
-    backbone_ids = {id(p) for p in backbone_params}
-    head_params = [p for p in model.parameters() if id(p) not in backbone_ids]
-
-    return [
-        {"params": backbone_params, "lr": backbone_lr},
-        {"params": head_params,     "lr": head_lr},
-    ]

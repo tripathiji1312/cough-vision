@@ -152,16 +152,15 @@ def find_who_threshold(
     sensitivity_target: float = 0.90,
 ) -> dict[str, float]:
     """
-    Find the **highest** decision threshold that still achieves
+    Find the highest decision threshold that still achieves
     ``sensitivity_target``, then report the specificity at that point.
 
-    sklearn's ``roc_curve`` returns thresholds in **descending** order, so
-    ``tpr`` increases with index.  The correct operating point is the
-    *first* index where ``tpr >= target`` — that is the strictest threshold
-    (highest score cut-off) that still meets sensitivity, giving the best
-    achievable specificity.
+    Implementation: iterates over every *unique* raw score as a candidate
+    threshold (not the collapsed ROC thresholds from sklearn, which can
+    represent multiple raw scores at a single (fpr, tpr) point).  This is
+    robust to score ties around the target sensitivity — audit CORRECT-02.
 
-    WHO TPP: ≥90% sensitivity at ≥70% specificity for triage use.
+    WHO TPP: >=90% sensitivity at >=70% specificity for triage use.
 
     Returns:
         Dict with keys: threshold, sensitivity, specificity, who_tpp_met.
@@ -169,38 +168,58 @@ def find_who_threshold(
     _require(_NP_AVAILABLE, "numpy")
     _require(_SK_AVAILABLE, "scikit-learn")
     import numpy as np  # type: ignore[import-untyped]
-    from sklearn.metrics import roc_curve  # type: ignore[import-untyped]
 
     try:
         yt = np.asarray(y_true, dtype=int)
         yp = np.asarray(y_prob, dtype=float)
 
-        fpr, tpr, thresholds = roc_curve(yt, yp)
+        # Candidate thresholds: every unique observed score in descending order
+        # (highest -> strictest -> lowest sensitivity, best specificity)
+        candidates = np.sort(np.unique(yp))[::-1]
 
-        # sklearn returns thresholds in descending order, so tpr is non-decreasing.
-        # valid_idx[0] is the FIRST (highest-threshold) point where sens ≥ target,
-        # giving the best specificity at the required sensitivity level.
-        valid_idx = np.where(tpr >= sensitivity_target)[0]
-        if len(valid_idx) == 0:
+        best_thresh = float(candidates[0])
+        best_sens   = 0.0
+        best_spec   = 0.0
+
+        n_pos = int(yt.sum())
+        n_neg = int((1 - yt).sum())
+
+        if n_pos == 0 or n_neg == 0:
+            warnings.warn("find_who_threshold: only one class present.", stacklevel=2)
+            return {"threshold": 0.5, "sensitivity": 0.0,
+                    "specificity": 0.0, "who_tpp_met": False}
+
+        for thresh in candidates:
+            preds = (yp >= thresh).astype(int)
+            tp = int(((preds == 1) & (yt == 1)).sum())
+            tn = int(((preds == 0) & (yt == 0)).sum())
+            sens = tp / n_pos
+            spec = tn / n_neg
+            if sens >= sensitivity_target:
+                # First candidate (highest threshold) that meets target
+                # => best achievable specificity at this sensitivity floor
+                best_thresh = float(thresh)
+                best_sens   = sens
+                best_spec   = spec
+                break
+            # Keep track of the best we can do if target is never reached
+            if sens > best_sens:
+                best_thresh = float(thresh)
+                best_sens   = sens
+                best_spec   = spec
+
+        if best_sens < sensitivity_target:
             warnings.warn(
-                f"No threshold achieves sensitivity ≥ {sensitivity_target:.0%}.",
+                f"No threshold achieves sensitivity >= {sensitivity_target:.0%}. "
+                f"Best achievable: {best_sens:.1%}.",
                 stacklevel=2,
             )
-            idx = int(np.argmax(tpr))
-        else:
-            idx = int(valid_idx[0])  # highest threshold that hits the target
 
-        chosen_threshold  = float(thresholds[idx])
-        achieved_sens     = float(tpr[idx])
-        achieved_spec     = float(1.0 - fpr[idx])
-        who_met           = (
-            achieved_sens >= sensitivity_target and achieved_spec >= 0.70
-        )
-
+        who_met = (best_sens >= sensitivity_target and best_spec >= 0.70)
         return {
-            "threshold":   chosen_threshold,
-            "sensitivity": achieved_sens,
-            "specificity": achieved_spec,
+            "threshold":   best_thresh,
+            "sensitivity": best_sens,
+            "specificity": best_spec,
             "who_tpp_met": who_met,
         }
     except Exception as exc:

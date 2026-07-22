@@ -54,25 +54,42 @@ def _build_conv_stem(
     embed_dim: int,
 ) -> Any:
     """
-    Build a multi-layer Conv2D stem that maps (B, C, H, W) →
+    Build a multi-layer Conv2D stem that maps (B, C, H, W) ->
     (B, embed_dim, H/patch_size, W/patch_size).
 
-    The final layer uses stride=patch_size to produce the same spatial
-    layout as a standard ViT patch embed, so the positional embeddings
-    remain compatible.
+    Each intermediate layer uses stride=2.  The final projection layer uses
+    a stride equal to ``patch_size // (2 ** len(stem_channels))`` so the
+    *total* downsampling is exactly ``patch_size``.
+
+    Raises ValueError if ``patch_size`` is not divisible by
+    ``2 ** len(stem_channels)``  — the caller must pick a compatible stem
+    depth to guarantee an exact token-grid match with the ViT positional
+    embedding (see audit finding CORRECT-01).
 
     Args:
         in_channels:   Input channels (3 for RGB CXR).
         stem_channels: Intermediate channel counts (e.g. (32, 64, 128)).
-        patch_size:    ViT patch size (e.g. 16) — used for the final stride.
+        patch_size:    ViT patch size — must be divisible by
+                       ``2 ** len(stem_channels)``.
         embed_dim:     ViT embedding dimension (e.g. 384 for ViT-S).
     """
     _require(_TORCH_AVAILABLE, "torch")
     import torch.nn as nn  # type: ignore[import-untyped]
 
+    stride_from_body = 2 ** len(stem_channels)
+    if patch_size % stride_from_body != 0:
+        raise ValueError(
+            f"patch_size={patch_size} is not divisible by "
+            f"2**len(stem_channels)={stride_from_body}. "
+            f"Choose a stem depth whose total stride divides patch_size exactly. "
+            f"For patch_size=16 use len(stem_channels) in {{1,2,4}} "
+            f"(remaining strides 8,4,1 resp.), or change the backbone."
+        )
+    final_stride: int = patch_size // stride_from_body  # exact, no floor ambiguity
+
     layers: list[Any] = []
     c_in = in_channels
-    for i, c_out in enumerate(stem_channels):
+    for c_out in stem_channels:
         layers += [
             nn.Conv2d(c_in, c_out, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(c_out),
@@ -80,12 +97,14 @@ def _build_conv_stem(
         ]
         c_in = c_out
 
-    # Final projection to embed_dim — stride chosen so total downsampling = patch_size
-    # e.g. 3-layer stem with stride-2 each = 8× downsampling → need 2× more → stride=2
-    remaining_stride = max(1, patch_size // (2 ** len(stem_channels)))
+    # Final projection: kernel chosen so output spatial size = input / patch_size
+    # kernel = final_stride + 1 gives same-as-strided-conv padding convention;
+    # when final_stride == 1 use kernel=1 (pointwise projection).
+    kernel = 1 if final_stride == 1 else final_stride + 1
+    pad    = 0 if final_stride == 1 else final_stride // 2
     layers += [
-        nn.Conv2d(c_in, embed_dim, kernel_size=remaining_stride + 1,
-                  stride=remaining_stride, padding=remaining_stride // 2, bias=False),
+        nn.Conv2d(c_in, embed_dim, kernel_size=kernel,
+                  stride=final_stride, padding=pad, bias=False),
         nn.BatchNorm2d(embed_dim),
     ]
     return nn.Sequential(*layers)
@@ -265,7 +284,7 @@ def _load_vit_weights(vit: Any, ckpt_path: str) -> None:
         raise FileNotFoundError(f"Checkpoint not found: {path}")
 
     try:
-        ckpt = torch.load(str(path), map_location="cpu")
+        ckpt = torch.load(str(path), map_location="cpu", weights_only=True)
     except Exception as exc:
         raise OSError(f"Failed to load ViT checkpoint {path}: {exc}") from exc
 

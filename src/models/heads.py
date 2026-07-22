@@ -131,8 +131,15 @@ class MultiTaskHead(object):
 
 def scale_to_cad4tb(prob: Any) -> Any:
     """
-    Convert a scalar TB probability in [0, 1] to a 0–100 integer score
-    matching the CAD4TB clinical display convention.
+    Linearly rescale a TB probability in [0, 1] to a 0-100 display score.
+
+    This is a *linear* mapping (score = prob * 100), not the non-linear
+    calibrated scoring used by the commercial CAD4TB product.  The 0-100
+    range is chosen to be clinically familiar to CAD4TB users, but the
+    per-unit interpretation differs.  Use per-site calibration
+    (evaluation/calibration.py) to align the operating threshold to local
+    prevalence before comparing scores to CAD4TB reference thresholds
+    (audit DEBT-05).
 
     Works on Python floats, numpy scalars/arrays, or torch tensors.
     """

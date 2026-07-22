@@ -74,7 +74,7 @@ def main() -> int:
 
     # Load checkpoint
     try:
-        ckpt = torch.load(args.checkpoint, map_location=args.device)
+        ckpt = torch.load(args.checkpoint, map_location=args.device, weights_only=False)  # nosec - our own checkpoints only
         model.load_state_dict(ckpt["model_state_dict"])
         print(f"Loaded checkpoint from {args.checkpoint} "
               f"(epoch {ckpt.get('epoch', '?')}, "
@@ -156,7 +156,7 @@ def main() -> int:
     print(f"{'='*60}")
     print(f"Full report → {report_path}")
 
-    # Optional: Grad-CAM audit of false negatives
+    # ── Grad-CAM audit of false negatives (DIR-01) ─────────────────────────
     if args.audit_fn:
         fn_dir = output_dir / "false_negatives"
         fn_dir.mkdir(exist_ok=True)
@@ -164,14 +164,61 @@ def main() -> int:
             who_thresh = report["who_operating_point"]["threshold"]
         except (KeyError, TypeError):
             who_thresh = 0.5
+
         fn_indices = [
             i for i, (yt_i, yp_i) in enumerate(zip(all_labels, all_probs))
             if yt_i == 1 and yp_i < who_thresh
         ]
         print(f"\nFalse negatives at WHO threshold: {len(fn_indices)}")
-        print(f"Grad-CAM overlays → {fn_dir}")
-        # (Full Grad-CAM audit would reload each image and run the CAM —
-        #  left as a post-processing step for the reporting pipeline.)
+        print(f"Saving Grad-CAM overlays to: {fn_dir}")
+
+        try:
+            import cv2  # type: ignore[import-untyped]
+            from data.preprocessing import load_image, apply_clahe  # type: ignore[import-untyped]
+            from data.augmentation import get_inference_transform  # type: ignore[import-untyped]
+            import PIL.Image as PilImage  # type: ignore[import-untyped]
+
+            model.enable_gradcam()
+            tf = get_inference_transform(cfg.preprocess.image_size_cnn)
+
+            n_saved = 0
+            top_k   = getattr(cfg.eval, "audit_top_k_fn", 50)
+            for rank, fn_idx in enumerate(fn_indices[:top_k]):
+                img_path = all_paths[fn_idx]
+                if not img_path:
+                    continue
+                try:
+                    raw = load_image(img_path)
+                    pil = PilImage.fromarray(apply_clahe(raw)).convert("RGB")
+                    img_t = tf(pil).unsqueeze(0).to(device)
+
+                    model.eval()
+                    with torch.no_grad():
+                        out_fn  = model(img_t)
+                    score = float(out_fn["tb_score"].cpu())
+
+                    hmap    = model._gradcam(img_t, class_idx=1)
+                    overlay = model._gradcam.overlay(hmap, raw)
+
+                    # Save overlay
+                    import numpy as _np  # type: ignore[import-untyped]
+                    save_path = fn_dir / f"fn_{rank:04d}_score{score:.0f}.png"
+                    cv2.imwrite(
+                        str(save_path),
+                        cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR),
+                    )
+                    n_saved += 1
+                except Exception as exc_inner:  # noqa: BLE001
+                    print(f"  [WARN] CAM failed for {img_path}: {exc_inner}")
+
+            model.disable_gradcam()
+            print(f"Saved {n_saved} Grad-CAM overlays (top-{top_k} false negatives).")
+            print(f"Review in: {fn_dir}")
+
+        except ImportError as exc_imp:
+            print(f"[WARN] Grad-CAM audit skipped: {exc_imp}")
+        except Exception as exc_cam:  # noqa: BLE001
+            print(f"[WARN] Grad-CAM audit failed: {exc_cam}")
 
     return 0
 

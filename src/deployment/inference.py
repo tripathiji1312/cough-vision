@@ -147,6 +147,7 @@ class InferenceEngine:
         onnx_path: str | Path,
         calibrator: Any | None = None,
         seg_model: Any | None = None,
+        torch_model: Any | None = None,
         input_size: int = 224,
         device: str = "cpu",
     ) -> "InferenceEngine":
@@ -157,6 +158,7 @@ class InferenceEngine:
             onnx_path:   Path to the exported ONNX model.
             calibrator:  Fitted per-site calibrator (optional but recommended).
             seg_model:   Fitted U-Net for on-the-fly lung masking (optional).
+            torch_model: Optional TBEnsemble nn.Module for Grad-CAM on positives.
             input_size:  CNN input resolution (224).
             device:      ORT execution provider: 'cpu', 'cuda', 'tensorrt'.
         """
@@ -188,6 +190,7 @@ class InferenceEngine:
             session=session,
             calibrator=calibrator,
             seg_model=seg_model,
+            torch_model=torch_model,
             input_size=input_size,
             device=device,
         )

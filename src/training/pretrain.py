@@ -78,9 +78,9 @@ def pretrain_moco(
     from ..data.augmentation import get_train_transform  # type: ignore[import-untyped]
     from torch.utils.data import DataLoader  # type: ignore[import-untyped]
 
-    backbone_name = getattr(cfg, "method", "densenet121")  # reuse method as name fallback
-    encoder = build_cnn_backbone("densenet121", pretrained="imagenet")
-    feat_dim = _CNN_FEATURE_DIMS.get("densenet121", 1024)
+    backbone_name = getattr(cfg, "backbone_name", "densenet121")
+    encoder = build_cnn_backbone(backbone_name, pretrained="imagenet")
+    feat_dim = _CNN_FEATURE_DIMS.get(backbone_name, 1024)
 
     moco_dim    = getattr(cfg, "moco_dim", 256)
     moco_mlp    = getattr(cfg, "moco_mlp_dim", 4096)
@@ -121,7 +121,7 @@ def pretrain_moco(
             self.encoder   = encoder
             self.projector = _Projector()
             # Momentum encoder (key encoder)
-            self.m_encoder   = build_cnn_backbone("densenet121", pretrained="imagenet")
+            self.m_encoder   = build_cnn_backbone(backbone_name, pretrained="imagenet")
             self.m_projector = _Projector()
             # Copy weights; turn off gradients for momentum encoder
             self._copy_params()

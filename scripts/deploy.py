@@ -134,7 +134,23 @@ def cmd_infer(args: argparse.Namespace) -> int:
         except Exception as exc:
             print(f"[WARN] Could not load calibrator: {exc}. Using raw scores.")
 
-    engine = InferenceEngine.from_onnx(args.onnx, calibrator=cal, device="cpu")
+    torch_model = None
+    if args.checkpoint:
+        try:
+            import torch  # type: ignore[import-untyped]
+            from config import get_config  # type: ignore[import-untyped]
+            from models import build_ensemble  # type: ignore[import-untyped]
+            cfg = get_config(args.preset)
+            torch_model = build_ensemble(cfg)
+            ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)  # nosec - our own checkpoints only
+            torch_model.load_state_dict(ckpt["model_state_dict"])
+            torch_model.eval()
+            print(f"Torch model loaded for Grad-CAM (epoch={ckpt.get('epoch','?')})")
+        except Exception as exc:
+            print(f"[WARN] Could not load torch model: {exc}. Grad-CAM disabled.")
+            torch_model = None
+
+    engine = InferenceEngine.from_onnx(args.onnx, calibrator=cal, torch_model=torch_model, device="cpu")
 
     result = engine.predict(args.image)
     print(f"\n{'='*50}")
@@ -177,9 +193,11 @@ def main() -> int:
 
     # --- infer ---
     pi = sub.add_parser("infer")
-    pi.add_argument("--onnx",       required=True)
-    pi.add_argument("--image",      required=True)
-    pi.add_argument("--calibrator", default=None)
+    pi.add_argument("--onnx",        required=True)
+    pi.add_argument("--image",       required=True)
+    pi.add_argument("--calibrator",  default=None)
+    pi.add_argument("--checkpoint",  default=None, help="Optional .pt checkpoint for Grad-CAM")
+    pi.add_argument("--preset",      default="densenet_vit_ensemble")
 
     args = p.parse_args()
 
